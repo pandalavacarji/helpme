@@ -4,14 +4,14 @@ import json
 
 app = FastAPI()
 
-# --- Configure this to your MQTT broker ---
+# --- MQTT broker configuration ---
 mqtt_config = MQTTConfig(
-    host="test.mosquitto.org",  # Use your MQTT broker here if needed
+    host="test.mosquitto.org",  # Change this to your MQTT broker host
     port=1883
 )
 fast_mqtt = FastMQTT(config=mqtt_config)
 fast_mqtt.init_app(app)
-# ------------------------------------------
+# ---------------------------------
 
 @app.get("/")
 async def root():
@@ -22,9 +22,8 @@ def command_topic(product_key: str, device_name: str):
 
 @app.post("/open_turnstile/")
 async def open_turnstile(product_key: str, device_name: str, door: int = 0):
-    # Prepare MQTT message as per your protocol
     message = {
-        "id": 2017,           # Example, you can generate a true random/incrementing one
+        "id": 2017,
         "taskNo": 10,
         "data": {
             "Door": door,
@@ -34,8 +33,7 @@ async def open_turnstile(product_key: str, device_name: str, door: int = 0):
         "method": "OpenDoor"
     }
     topic = command_topic(product_key, device_name)
-    # Convert message to JSON string as required by MQTT
-    await fast_mqtt.publish(topic, json.dumps(message))
+    fast_mqtt.publish(topic, json.dumps(message))  # No await here
     return {
         "result": "MQTT sent",
         "topic": topic,
