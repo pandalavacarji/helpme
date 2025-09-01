@@ -1,10 +1,12 @@
 services:
   - type: web
-    name: access-controller-server
+    name: helpme-access-controller
     env: python
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2
+    startCommand: python tcp.py
     envVars:
       - key: PORT
-        value: 9000
-    healthCheckPath: /health
+        value: "9000"
+    healthCheckPath: /
+    autoDeploy: true
