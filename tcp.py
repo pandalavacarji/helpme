@@ -9,7 +9,6 @@ import os
 
 from flask import Flask, jsonify, request
 
-# --- Logging ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -33,8 +32,6 @@ class AccessControllerServer:
         self.tcp_thread = None
         self.udp_thread = None
         self.heartbeat_thread = None
-
-        # Model mapping from the documentation
         self.model_mapping = {
             1: "TCP Single door",
             2: "TCP Dual door",
@@ -60,19 +57,16 @@ class AccessControllerServer:
 
     def start_server(self):
         self.running = True
-        port = 9000  # Always use port 9000
+        port = 9000
         self.udp_thread = threading.Thread(target=self._udp_discovery_listener, args=(port,))
         self.udp_thread.daemon = True
         self.udp_thread.start()
-
         self.tcp_thread = threading.Thread(target=self._tcp_connection_manager)
         self.tcp_thread.daemon = True
         self.tcp_thread.start()
-
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_monitor)
         self.heartbeat_thread.daemon = True
         self.heartbeat_thread.start()
-
         logger.info(f"Access Controller Server started on port {port}")
 
     def stop_server(self):
@@ -98,7 +92,7 @@ class AccessControllerServer:
         while self.running:
             try:
                 data, addr = self.udp_socket.recvfrom(1024)
-                self._parse_discovery_response(data, addr)
+                self._parse_discovery_response(data, addr[0])
             except socket.timeout:
                 continue
             except Exception as e:
@@ -108,7 +102,7 @@ class AccessControllerServer:
     def send_discovery_broadcast(self):
         if not self.udp_socket:
             return
-        discovery_packet = bytes.fromhex('02 A0 99 00 00 00 00 3B 03')
+        discovery_packet = bytes.fromhex('02A099000000003B03')
         broadcast_addr = ('255.255.255.255', 9000)
         try:
             self.udp_socket.sendto(discovery_packet, broadcast_addr)
@@ -119,7 +113,7 @@ class AccessControllerServer:
     def send_discovery_direct(self, turnstile_ip: str):
         if not self.udp_socket:
             return
-        discovery_packet = bytes.fromhex('02 A0 99 00 00 00 00 3B 03')
+        discovery_packet = bytes.fromhex('02A099000000003B03')
         try:
             self.udp_socket.sendto(discovery_packet, (turnstile_ip, 9000))
             logger.info(f"Sent discovery to {turnstile_ip}")
@@ -128,7 +122,7 @@ class AccessControllerServer:
 
     def _parse_discovery_response(self, data: bytes, ip_address: str):
         try:
-            if len(data) < 30 or data != 0x02 or data[-1] != 0x03:
+            if len(data) < 30 or data[0] != 0x02 or data[-1] != 0x03:
                 return
             calculated_cs = 0
             for byte in data[1:-2]:
@@ -143,11 +137,11 @@ class AccessControllerServer:
                 self.controllers[serial_number].last_heartbeat = time.time()
                 logger.info(f"Rediscovered controller {serial_number} at {ip_address}")
                 return
-            model_type = data
+            model_type = data[13]
             model_description = self.model_mapping.get(model_type, "Unknown model")
-            version = f"{data}.{data}"
-            mac_address = f"{data:02X}"
-            port = struct.unpack('<H', data[22:24])
+            version = f"{data[14]}.{data[15]}"
+            mac_address = f"{data[28]:02X}"
+            port = struct.unpack('<H', data[22:24])[0]
             controller = ControllerInfo(
                 ip_address=ip_address,
                 serial_number=serial_number,
@@ -201,8 +195,8 @@ class AccessControllerServer:
                     buffer = buffer[start_idx:]
                     if len(buffer) < 7:
                         break
-                    length_l = buffer[2]
-                    length_h = buffer[3]
+                    length_l = buffer[5]
+                    length_h = buffer[6]
                     data_length = length_l + (length_h << 8)
                     total_length = 7 + data_length + 2
                     if len(buffer) < total_length:
@@ -230,15 +224,15 @@ class AccessControllerServer:
                 break
 
     def _process_controller_message(self, controller: ControllerInfo, message: bytes):
-        command = message[4]
-        if command == 0x56:  # Heartbeat/status
+        command = message[2]
+        if command == 0x56:
             controller.last_heartbeat = time.time()
             self._handle_heartbeat(controller, message)
-        elif command == 0x53:  # Card swipe record
+        elif command == 0x53:
             self._handle_card_swipe(controller, message)
-        elif command == 0x54:  # Alarm record
+        elif command == 0x54:
             self._handle_alarm_record(controller, message)
-        elif command == 0x52:  # Card state record
+        elif command == 0x52:
             self._handle_card_state(controller, message)
         else:
             logger.info(f"Received unknown command 0x{command:02X} from controller {controller.serial_number}")
@@ -268,7 +262,7 @@ class AccessControllerServer:
 
     def _build_response_frame(self, command: int, data: bytes = b'') -> bytes:
         frame = bytearray()
-        frame.append(0x02)  # STX
+        frame.append(0x02)
         frame.append(0xA0)
         frame.append(command)
         frame.append(0xFF)
@@ -352,7 +346,6 @@ class AccessControllerServer:
             'controllers_count': len(self.controllers)
         }
 
-# --- Flask App ---
 app = Flask(__name__)
 server = AccessControllerServer()
 threads_started = False
@@ -395,9 +388,20 @@ def set_time(serial):
     return jsonify({'success': success, 'serial': serial})
 
 @app.route('/health')
-def health_check():
+def health():
     return jsonify({'status': 'healthy', 'controllers': len(server.controllers)})
 
+@app.route('/api/AcsEvent', methods=['POST'])
+def handle_gate_event():
+    data = request.get_json()
+    logger.info(f"Received gate event: {data}")
+    return jsonify({'status': 'event received'}), 200
+
+@app.route('/api/AcsStatus', methods=['POST'])
+def handle_gate_status():
+    data = request.get_json()
+    logger.info(f"Received heartbeat: {data}")
+    return jsonify({'status': 'status received'}), 200
+
 if __name__ == "__main__":
-    # Force port 9000. If deploying on Render, set PORT=9000 in Render dashboard.
     app.run(host='0.0.0.0', port=9000, debug=False)
