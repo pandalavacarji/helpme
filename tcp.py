@@ -394,12 +394,46 @@ def health():
 @app.route('/api/AcsEvent', methods=['POST'])
 def handle_gate_event():
     data = request.get_json()
+    controller_serial = data.get('serial_number') or data.get('SerialNo') or None
+    ip_address = request.remote_addr
+    if controller_serial:
+        if controller_serial not in server.controllers:
+            controller = ControllerInfo(
+                ip_address=ip_address,
+                serial_number=controller_serial,
+                model_type=0,
+                model_description="Unknown (via HTTP POST)",
+                version="N/A",
+                mac_address="N/A",
+                port=9000
+            )
+            server.controllers[controller_serial] = controller
+            logger.info(f"Added controller {controller_serial} from HTTP POST event")
+        else:
+            server.controllers[controller_serial].last_heartbeat = time.time()
     logger.info(f"Received gate event: {data}")
     return jsonify({'status': 'event received'}), 200
 
 @app.route('/api/AcsStatus', methods=['POST'])
 def handle_gate_status():
     data = request.get_json()
+    controller_serial = data.get('serial_number') or data.get('SerialNo') or None
+    ip_address = request.remote_addr
+    if controller_serial:
+        if controller_serial in server.controllers:
+            server.controllers[controller_serial].last_heartbeat = time.time()
+        else:
+            controller = ControllerInfo(
+                ip_address=ip_address,
+                serial_number=controller_serial,
+                model_type=0,
+                model_description="Unknown (via HTTP POST)",
+                version="N/A",
+                mac_address="N/A",
+                port=9000
+            )
+            server.controllers[controller_serial] = controller
+            logger.info(f"Added controller {controller_serial} from HTTP POST status")
     logger.info(f"Received heartbeat: {data}")
     return jsonify({'status': 'status received'}), 200
 
