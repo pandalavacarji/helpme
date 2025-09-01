@@ -60,8 +60,7 @@ class AccessControllerServer:
 
     def start_server(self):
         self.running = True
-        port = int(os.environ.get('PORT', 9000))
-
+        port = 9000  # Always use port 9000
         self.udp_thread = threading.Thread(target=self._udp_discovery_listener, args=(port,))
         self.udp_thread.daemon = True
         self.udp_thread.start()
@@ -202,8 +201,8 @@ class AccessControllerServer:
                     buffer = buffer[start_idx:]
                     if len(buffer) < 7:
                         break
-                    length_l = buffer[5]
-                    length_h = buffer[6]
+                    length_l = buffer[2]
+                    length_h = buffer[3]
                     data_length = length_l + (length_h << 8)
                     total_length = 7 + data_length + 2
                     if len(buffer) < total_length:
@@ -231,7 +230,7 @@ class AccessControllerServer:
                 break
 
     def _process_controller_message(self, controller: ControllerInfo, message: bytes):
-        command = message[2]
+        command = message[4]
         if command == 0x56:  # Heartbeat/status
             controller.last_heartbeat = time.time()
             self._handle_heartbeat(controller, message)
@@ -348,15 +347,14 @@ class AccessControllerServer:
 
     def get_server_info(self) -> Dict:
         return {
-            'port': int(os.environ.get('PORT', 9000)),
+            'port': 9000,
             'running': self.running,
             'controllers_count': len(self.controllers)
         }
 
-# ---- Flask App ----
+# --- Flask App ---
 app = Flask(__name__)
 server = AccessControllerServer()
-
 threads_started = False
 
 @app.before_request
@@ -401,14 +399,5 @@ def health_check():
     return jsonify({'status': 'healthy', 'controllers': len(server.controllers)})
 
 if __name__ == "__main__":
-    port = int(os.environ.get('PORT', 9000))
-    # Only run Flask's native dev server locally, not in production
-    if os.environ.get('RENDER', '').lower() != 'true':
-        app.run(host='0.0.0.0', port=port, debug=False)
-    try:
-        # Keep main thread alive for background threads if running directly
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-        server.stop_server()
+    # Force port 9000. If deploying on Render, set PORT=9000 in Render dashboard.
+    app.run(host='0.0.0.0', port=9000, debug=False)
